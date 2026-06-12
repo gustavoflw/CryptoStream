@@ -101,35 +101,46 @@ if __name__ == "__main__":  # pragma: no cover
     bootstrap = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     registry_url = os.getenv("SCHEMA_REGISTRY_URL", "http://localhost:8081")
 
-    # Register schema and obtain its ID from the registry.
-    schema_str = _SCHEMA_PATH.read_text()
-    resp = requests.post(
-        f"{registry_url}/subjects/{TOPIC}-value/versions",
-        json={"schema": schema_str},
-        headers={"Content-Type": "application/vnd.schemaregistry.v1+json"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    schema_id: int = resp.json()["id"]
+    def _register(subject: str, schema_str: str) -> int:
+        resp = requests.post(
+            f"{registry_url}/subjects/{subject}/versions",
+            json={"schema": schema_str},
+            headers={"Content-Type": "application/vnd.schemaregistry.v1+json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()["id"]  # type: ignore[no-any-return]
 
-    parsed_schema = fastavro.parse_schema(json.loads(schema_str))
+    def _make_serializer(schema_id: int, parsed_schema: object) -> object:
+        def _serialize(data: object) -> bytes:
+            buf = io.BytesIO()
+            buf.write(b"\x00")
+            buf.write(struct.pack(">I", schema_id))
+            fastavro.schemaless_writer(buf, parsed_schema, data)
+            return buf.getvalue()
+        return _serialize
 
-    def _avro_serializer(record: TradeRecord) -> bytes:
-        """Encode a record using the Confluent wire format: magic + schema ID + Avro binary."""
-        buf = io.BytesIO()
-        buf.write(b"\x00")
-        buf.write(struct.pack(">I", schema_id))
-        fastavro.schemaless_writer(buf, parsed_schema, record)
-        return buf.getvalue()
+    value_schema_str = _SCHEMA_PATH.read_text()
+    key_schema_str = (_SCHEMA_PATH.parent / "trade_key.avsc").read_text()
+
+    value_schema_id = _register(f"{TOPIC}-value", value_schema_str)
+    key_schema_id = _register(f"{TOPIC}-key", key_schema_str)
 
     kafka_producer: KafkaProducer = KafkaProducer(  # type: ignore[type-arg]
         bootstrap_servers=bootstrap,
-        value_serializer=_avro_serializer,
-        key_serializer=str.encode,
+        value_serializer=_make_serializer(
+            value_schema_id, fastavro.parse_schema(json.loads(value_schema_str))
+        ),
+        key_serializer=_make_serializer(
+            key_schema_id, fastavro.parse_schema(json.loads(key_schema_str))
+        ),
     )
 
     publisher = TradePublisher(kafka_producer, TOPIC, SYMBOLS)
-    log.info("Publishing to %s → topic '%s' (schema_id=%d)", bootstrap, TOPIC, schema_id)
+    log.info(
+        "Publishing to %s → topic '%s' (value_schema_id=%d, key_schema_id=%d)",
+        bootstrap, TOPIC, value_schema_id, key_schema_id,
+    )
 
     ws_app = websocket.WebSocketApp(
         f"wss://ws.finnhub.io?token={api_key}",
