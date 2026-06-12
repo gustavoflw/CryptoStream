@@ -17,15 +17,21 @@ Demonstrates how three complementary tools fit together in a modern streaming ar
 ## Components
 
 ### 1. Producer (Python)
+![Producer coverage](.assets/coverage-producer.svg)
+
 A small script connects to Finnhub's websocket API, subscribes to a basket of crypto pairs (e.g. `BINANCE:BTCUSDT`, `BINANCE:ETHUSDT`), and publishes each trade event to the `trades` Kafka topic, keyed by symbol.
 
 ### 2. Flink job (Scala)
+![Flink coverage](.assets/coverage-flink.svg)
+
 Consumes the `trades` topic and:
 - Computes tumbling window aggregates (avg/min/max price, volume) per symbol every 10-30 seconds
 - Detects price spikes (percentage change between consecutive windows above a threshold)
 - Writes window aggregates to `price_aggregates` and spike alerts to `alerts`
 
 ### 3. Spark job (Scala)
+![Spark coverage](.assets/coverage-spark.svg)
+
 Run on-demand (batch) against accumulated `price_aggregates` data to compute:
 - Daily volatility (standard deviation of price) per symbol
 - Min/max/avg price per symbol per day

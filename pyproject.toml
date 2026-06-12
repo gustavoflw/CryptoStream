@@ -17,6 +17,7 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "ruff>=0.11",
+    "genbadge[coverage]>=1.1",
 ]
 
 [tool.ruff]
@@ -43,7 +44,7 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["producer/tests"]
 pythonpath = ["."]
-addopts = "--cov=producer.producer --cov-report=term-missing --cov-fail-under=80"
+addopts = "--cov=producer.producer --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=80"
 
 [tool.coverage.run]
 source = ["producer"]

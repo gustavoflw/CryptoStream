@@ -18,6 +18,8 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,6 +29,15 @@ jobs:
         run: pip install ".[dev]"
       - name: Run tests with coverage
         run: pytest
+      - name: Generate producer coverage badge
+        if: github.ref == 'refs/heads/main'
+        run: genbadge coverage -i coverage.xml -o .assets/coverage-producer.svg
+      - name: Commit updated badge
+        if: github.ref == 'refs/heads/main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update coverage badge [skip ci]"
+          file_pattern: .assets/coverage-producer.svg
 
   scan:
     runs-on: ubuntu-24.04
