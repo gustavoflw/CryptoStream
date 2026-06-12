@@ -45,13 +45,11 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run Trivy vulnerability scanner
+      - name: Run Trivy (SARIF report)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: "1"
           format: sarif
           output: trivy-results.sarif
       - name: Upload results to GitHub Security tab
@@ -59,3 +57,11 @@ jobs:
         if: always()
         with:
           sarif_file: trivy-results.sarif
+      - name: Fail on HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
