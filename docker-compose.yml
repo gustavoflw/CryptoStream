@@ -54,7 +54,7 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
     depends_on:
       schema-registry:
-        condition: service_started
+        condition: service_healthy
     restart: on-failure
 
   kafka-ui:
