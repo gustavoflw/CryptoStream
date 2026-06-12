@@ -1,6 +1,6 @@
 # CryptoStream
 
-A weekend learning project exploring how **Kafka**, **Apache Flink**, and **Apache Spark** work together in a real-time + batch data pipeline, using live cryptocurrency trade data from Finnhub.
+A real-time + batch data pipeline built with **Kafka**, **Apache Flink**, and **Apache Spark**, streaming live cryptocurrency trade data from Finnhub.
 
 ## Overview
 
@@ -8,7 +8,7 @@ A weekend learning project exploring how **Kafka**, **Apache Flink**, and **Apac
 
 ## Goals
 
-This project is meant to build intuition for how these three tools fit together in a typical streaming architecture:
+Demonstrates how three complementary tools fit together in a modern streaming architecture:
 
 - **Kafka** as the durable, decoupled transport layer between components
 - **Flink** for low-latency, stateful stream processing (windowing, anomaly detection)
@@ -98,8 +98,7 @@ CryptoStream/
 
 ## Notes
 
-- Crypto pairs are used instead of traditional stocks because they trade 24/7, making this suitable for weekend development.
-- This is a learning project, not a production system — error handling, scaling, and security are intentionally minimal.
+- Crypto pairs are used because they trade 24/7, providing a continuous stream of real data.
 
 ## License
 
