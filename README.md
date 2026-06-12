@@ -47,9 +47,10 @@ Outputs a summary report to console/CSV.
 ```
 CryptoStream/
 ├── docker-compose.yml
+├── pyproject.toml
 ├── producer/
 │   ├── producer.py
-│   └── requirements.txt
+│   └── tests/
 ├── flink-job/
 │   ├── build.sbt
 │   └── src/main/scala/...
@@ -79,9 +80,8 @@ CryptoStream/
 
 2. Start the producer:
    ```bash
-   cd producer
-   pip install -r requirements.txt
-   python producer.py
+   pip install .
+   python producer/producer.py
    ```
 
 3. Run the Flink job:
