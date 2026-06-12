@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from producer.producer import TradePublisher, _encode_json, _encode_key
+from producer.producer import TradePublisher
 
 SYMBOLS = ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT"]
 
@@ -71,11 +71,3 @@ def test_on_error_logs(publisher: tuple[TradePublisher, MagicMock]) -> None:
     pub.on_error(MagicMock(), ValueError("connection reset"))
 
 
-def test_encode_json_returns_bytes() -> None:
-    record = {"symbol": "BINANCE:BTCUSDT", "price": 50000.0, "volume": 0.1, "timestamp": 1_000_000}
-    result = _encode_json(record)
-    assert result == json.dumps(record).encode()
-
-
-def test_encode_key_returns_bytes() -> None:
-    assert _encode_key("BINANCE:BTCUSDT") == b"BINANCE:BTCUSDT"

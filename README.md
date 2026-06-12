@@ -21,6 +21,8 @@ Demonstrates how three complementary tools fit together in a modern streaming ar
 
 A small script connects to Finnhub's websocket API, subscribes to a basket of crypto pairs (e.g. `BINANCE:BTCUSDT`, `BINANCE:ETHUSDT`), and publishes each trade event to the `trades` Kafka topic, keyed by symbol.
 
+Messages are serialized using **Avro** (schema defined in `producer/schemas/trade.avsc`) with the Confluent wire format (`\x00` + 4-byte schema ID + Avro binary). On startup the producer registers the schema under subject `trades-value` and obtains its ID from the Schema Registry. BACKWARD compatibility is enforced at the registry level — a schema change that would break existing consumers is rejected.
+
 ### 2. Flink job (Scala)
 ![Flink coverage](.assets/coverage-flink.svg)
 
@@ -41,10 +43,11 @@ Outputs a summary report to console/CSV.
 
 ## Tech stack
 
-- Kafka (KRaft mode, no Zookeeper)
+- Kafka (KRaft mode, no Zookeeper) — `apache/kafka:3.9.0`
+- Confluent Schema Registry — enforces BACKWARD-compatible Avro schemas
 - Apache Flink (Scala)
 - Apache Spark (Scala)
-- Python 3.x (producer only)
+- Python 3.14 (producer only)
 - Docker Compose for orchestration
 - SBT for Scala builds
 
@@ -56,6 +59,8 @@ CryptoStream/
 ├── pyproject.toml
 ├── producer/
 │   ├── producer.py
+│   ├── schemas/
+│   │   └── trade.avsc       # Avro schema, registered in Schema Registry on startup
 │   └── tests/
 ├── flink-job/
 │   ├── build.sbt
@@ -79,16 +84,16 @@ CryptoStream/
 
 ### Running the pipeline
 
-1. Start Kafka:
+1. Start Kafka, Schema Registry, producer, and Kafbat UI:
    ```bash
-   docker compose up -d kafka
+   docker compose up -d --build
    ```
 
-2. Start the producer:
-   ```bash
-   pip install .
-   python producer/producer.py
-   ```
+   - Kafka broker: `localhost:9092`
+   - Schema Registry: [http://localhost:8081](http://localhost:8081)
+   - Kafbat UI: [http://localhost:8080](http://localhost:8080)
+
+   The producer starts automatically once Kafka is healthy, registers the Avro schema, and begins streaming trades into the `trades` topic.
 
 3. Run the Flink job:
    ```bash

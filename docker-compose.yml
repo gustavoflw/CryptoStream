@@ -26,6 +26,19 @@ services:
       timeout: 5s
       retries: 10
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.0
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   producer:
     build:
       context: .
@@ -33,9 +46,10 @@ services:
     env_file: .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
     depends_on:
-      kafka:
-        condition: service_healthy
+      schema-registry:
+        condition: service_started
     restart: on-failure
 
   kafka-ui:
