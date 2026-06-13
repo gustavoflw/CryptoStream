@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "Alert",
+  "namespace": "io.cryptostream",
+  "fields": [
+    {"name": "symbol",        "type": "string"},
+    {"name": "windowStart",   "type": "long"},
+    {"name": "prevAvgPrice",  "type": "double"},
+    {"name": "currAvgPrice",  "type": "double"},
+    {"name": "changePercent", "type": "double"}
+  ]
+}

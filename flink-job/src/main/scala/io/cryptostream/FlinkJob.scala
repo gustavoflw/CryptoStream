@@ -1,10 +1,13 @@
 package io.cryptostream
 
+import io.confluent.kafka.schemaregistry.avro.AvroSchema
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient
 import org.apache.avro.Schema
-import org.apache.avro.generic.GenericRecord
+import org.apache.avro.generic.{GenericData, GenericDatumWriter, GenericRecord}
+import org.apache.avro.io.EncoderFactory
 import org.apache.flink.api.common.eventtime.WatermarkStrategy
-import org.apache.flink.api.common.functions.{AggregateFunction, MapFunction, RichFlatMapFunction}
-import org.apache.flink.api.common.serialization.SimpleStringSchema
+import org.apache.flink.api.common.functions.{AggregateFunction, RichFlatMapFunction, RichMapFunction}
+import org.apache.flink.api.common.serialization.SerializationSchema
 import org.apache.flink.api.common.state.{ValueState, ValueStateDescriptor}
 import org.apache.flink.api.java.functions.KeySelector
 import org.apache.flink.configuration.Configuration
@@ -16,6 +19,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.streaming.api.windowing.assigners.TumblingProcessingTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 
 // ---------------------------------------------------------------------------
 // Models
@@ -44,34 +49,32 @@ case class Alert(
 
 // Mutable POJO accumulator — no-arg constructor + var fields for Flink's type extractor.
 class TradeAccum {
-  var symbol: String         = ""
-  var priceSum: Double       = 0.0
-  var minPrice: Double       = Double.MaxValue
-  var maxPrice: Double       = Double.MinValue
-  var totalVolume: Double    = 0.0
-  var tradeCount: Long       = 0L
-  var firstTimestamp: Long   = Long.MaxValue
-  var lastTimestamp: Long    = Long.MinValue
+  var symbol: String       = ""
+  var priceSum: Double     = 0.0
+  var minPrice: Double     = Double.MaxValue
+  var maxPrice: Double     = Double.MinValue
+  var totalVolume: Double  = 0.0
+  var tradeCount: Long     = 0L
+  var firstTimestamp: Long = Long.MaxValue
+  var lastTimestamp: Long  = Long.MinValue
 }
 
 // ---------------------------------------------------------------------------
-// Windowed aggregation — outputs PriceAggregate directly, no ProcessWindowFunction
-// needed (avoids Scala 2.12 inner-class / Iterable override incompatibilities).
-// Window bounds are derived from event timestamps in the accumulator.
+// Windowed aggregation
 // ---------------------------------------------------------------------------
 
 class TradeAggregator extends AggregateFunction[Trade, TradeAccum, PriceAggregate] {
   override def createAccumulator(): TradeAccum = new TradeAccum
 
   override def add(t: Trade, acc: TradeAccum): TradeAccum = {
-    acc.symbol          = t.symbol
-    acc.priceSum       += t.price
-    acc.minPrice        = math.min(acc.minPrice, t.price)
-    acc.maxPrice        = math.max(acc.maxPrice, t.price)
-    acc.totalVolume    += t.volume
-    acc.tradeCount     += 1
-    acc.firstTimestamp  = math.min(acc.firstTimestamp, t.timestamp)
-    acc.lastTimestamp   = math.max(acc.lastTimestamp, t.timestamp)
+    acc.symbol         = t.symbol
+    acc.priceSum      += t.price
+    acc.minPrice       = math.min(acc.minPrice, t.price)
+    acc.maxPrice       = math.max(acc.maxPrice, t.price)
+    acc.totalVolume   += t.volume
+    acc.tradeCount    += 1
+    acc.firstTimestamp = math.min(acc.firstTimestamp, t.timestamp)
+    acc.lastTimestamp  = math.max(acc.lastTimestamp, t.timestamp)
     acc
   }
 
@@ -88,19 +91,19 @@ class TradeAggregator extends AggregateFunction[Trade, TradeAccum, PriceAggregat
     )
 
   override def merge(a: TradeAccum, b: TradeAccum): TradeAccum = {
-    a.priceSum        += b.priceSum
-    a.minPrice         = math.min(a.minPrice, b.minPrice)
-    a.maxPrice         = math.max(a.maxPrice, b.maxPrice)
-    a.totalVolume     += b.totalVolume
-    a.tradeCount      += b.tradeCount
-    a.firstTimestamp   = math.min(a.firstTimestamp, b.firstTimestamp)
-    a.lastTimestamp    = math.max(a.lastTimestamp, b.lastTimestamp)
+    a.priceSum       += b.priceSum
+    a.minPrice        = math.min(a.minPrice, b.minPrice)
+    a.maxPrice        = math.max(a.maxPrice, b.maxPrice)
+    a.totalVolume    += b.totalVolume
+    a.tradeCount     += b.tradeCount
+    a.firstTimestamp  = math.min(a.firstTimestamp, b.firstTimestamp)
+    a.lastTimestamp   = math.max(a.lastTimestamp, b.lastTimestamp)
     a
   }
 }
 
 // ---------------------------------------------------------------------------
-// Spike detection — flags windows where avg price moved > threshold %
+// Spike detection
 // ---------------------------------------------------------------------------
 
 class SpikeDetector(threshold: Double)
@@ -124,23 +127,88 @@ class SpikeDetector(threshold: Double)
 }
 
 // ---------------------------------------------------------------------------
+// Confluent wire-format Avro serializer for Kafka sinks
+// ---------------------------------------------------------------------------
+
+class ConfluentAvroSerializer(schemaStr: String, subject: String, registryUrl: String)
+    extends SerializationSchema[GenericRecord] {
+
+  @transient private var schemaId: Int                          = -1
+  @transient private var writer: GenericDatumWriter[GenericRecord] = _
+
+  override def open(ctx: SerializationSchema.InitializationContext): Unit = {
+    val parsed = new Schema.Parser().parse(schemaStr)
+    val client = new CachedSchemaRegistryClient(registryUrl, 100)
+    schemaId = client.register(subject, new AvroSchema(parsed))
+    writer   = new GenericDatumWriter[GenericRecord](parsed)
+  }
+
+  override def serialize(record: GenericRecord): Array[Byte] = {
+    val out = new ByteArrayOutputStream()
+    out.write(0)                                         // magic byte
+    out.write(ByteBuffer.allocate(4).putInt(schemaId).array()) // 4-byte schema ID
+    val encoder = EncoderFactory.get().binaryEncoder(out, null)
+    writer.write(record, encoder)
+    encoder.flush()
+    out.toByteArray
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Case class → GenericRecord mappers
+// ---------------------------------------------------------------------------
+
+class PriceAggregateMapper(schemaStr: String) extends RichMapFunction[PriceAggregate, GenericRecord] {
+  @transient private var schema: Schema = _
+
+  override def open(config: Configuration): Unit =
+    schema = new Schema.Parser().parse(schemaStr)
+
+  override def map(a: PriceAggregate): GenericRecord = {
+    val r = new GenericData.Record(schema)
+    r.put("symbol",      a.symbol)
+    r.put("windowStart", a.windowStart)
+    r.put("windowEnd",   a.windowEnd)
+    r.put("avgPrice",    a.avgPrice)
+    r.put("minPrice",    a.minPrice)
+    r.put("maxPrice",    a.maxPrice)
+    r.put("totalVolume", a.totalVolume)
+    r.put("tradeCount",  a.tradeCount)
+    r
+  }
+}
+
+class AlertMapper(schemaStr: String) extends RichMapFunction[Alert, GenericRecord] {
+  @transient private var schema: Schema = _
+
+  override def open(config: Configuration): Unit =
+    schema = new Schema.Parser().parse(schemaStr)
+
+  override def map(a: Alert): GenericRecord = {
+    val r = new GenericData.Record(schema)
+    r.put("symbol",        a.symbol)
+    r.put("windowStart",   a.windowStart)
+    r.put("prevAvgPrice",  a.prevAvgPrice)
+    r.put("currAvgPrice",  a.currAvgPrice)
+    r.put("changePercent", a.changePercent)
+    r
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
 object FlinkJob {
 
-  val TradeSchemaStr: String =
-    """|{
-       |  "type": "record",
-       |  "name": "Trade",
-       |  "namespace": "io.cryptostream",
-       |  "fields": [
-       |    {"name": "symbol",    "type": "string"},
-       |    {"name": "price",     "type": "double"},
-       |    {"name": "volume",    "type": "double"},
-       |    {"name": "timestamp", "type": "long", "doc": "Unix milliseconds"}
-       |  ]
-       |}""".stripMargin
+  private def loadSchema(resource: String): String = {
+    val stream = getClass.getClassLoader.getResourceAsStream(resource)
+    scala.io.Source.fromInputStream(stream).mkString
+  }
+
+  lazy val TradeSchemaStr: String          = loadSchema("trade.avsc")
+  lazy val PriceAggregateSchemaStr: String = loadSchema("price_aggregate.avsc")
+  lazy val AlertSchemaStr: String          = loadSchema("alert.avsc")
 
   def main(args: Array[String]): Unit = {
     val bootstrapServers  = sys.env.getOrElse("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -169,7 +237,7 @@ object FlinkJob {
 
     val trades = env
       .fromSource(source, WatermarkStrategy.noWatermarks[GenericRecord](), "Kafka trades")
-      .map(new MapFunction[GenericRecord, Trade] {
+      .map(new org.apache.flink.api.common.functions.MapFunction[GenericRecord, Trade] {
         override def map(r: GenericRecord): Trade = Trade(
           symbol    = r.get("symbol").toString,
           price     = r.get("price").asInstanceOf[Double],
@@ -192,31 +260,32 @@ object FlinkJob {
       .flatMap(new SpikeDetector(spikeThresholdPct))
 
     aggregates
-      .map(new MapFunction[PriceAggregate, String] {
-        override def map(a: PriceAggregate): String =
-          s"""{"symbol":"${a.symbol}","windowStart":${a.windowStart},"windowEnd":${a.windowEnd},"avgPrice":${a.avgPrice},"minPrice":${a.minPrice},"maxPrice":${a.maxPrice},"totalVolume":${a.totalVolume},"tradeCount":${a.tradeCount}}"""
-      })
-      .sinkTo(kafkaSink(bootstrapServers, "price_aggregates"))
+      .map(new PriceAggregateMapper(PriceAggregateSchemaStr))
+      .sinkTo(avroKafkaSink(bootstrapServers, "price_aggregates", PriceAggregateSchemaStr, schemaRegistryUrl))
 
     alerts
-      .map(new MapFunction[Alert, String] {
-        override def map(a: Alert): String =
-          s"""{"symbol":"${a.symbol}","windowStart":${a.windowStart},"prevAvgPrice":${a.prevAvgPrice},"currAvgPrice":${a.currAvgPrice},"changePercent":${a.changePercent}}"""
-      })
-      .sinkTo(kafkaSink(bootstrapServers, "alerts"))
+      .map(new AlertMapper(AlertSchemaStr))
+      .sinkTo(avroKafkaSink(bootstrapServers, "alerts", AlertSchemaStr, schemaRegistryUrl))
 
     env.execute("CryptoStream Flink Job")
   }
 
-  private def kafkaSink(bootstrapServers: String, topic: String): KafkaSink[String] =
+  private def avroKafkaSink(
+    bootstrapServers: String,
+    topic: String,
+    schemaStr: String,
+    registryUrl: String,
+  ): KafkaSink[GenericRecord] =
     KafkaSink
-      .builder[String]()
+      .builder[GenericRecord]()
       .setBootstrapServers(bootstrapServers)
       .setRecordSerializer(
         KafkaRecordSerializationSchema
-          .builder[String]()
+          .builder[GenericRecord]()
           .setTopic(topic)
-          .setValueSerializationSchema(new SimpleStringSchema())
+          .setValueSerializationSchema(
+            new ConfluentAvroSerializer(schemaStr, s"$topic-value", registryUrl)
+          )
           .build()
       )
       .build()

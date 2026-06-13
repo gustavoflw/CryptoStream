@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "PriceAggregate",
+  "namespace": "io.cryptostream",
+  "fields": [
+    {"name": "symbol",      "type": "string"},
+    {"name": "windowStart", "type": "long"},
+    {"name": "windowEnd",   "type": "long"},
+    {"name": "avgPrice",    "type": "double"},
+    {"name": "minPrice",    "type": "double"},
+    {"name": "maxPrice",    "type": "double"},
+    {"name": "totalVolume", "type": "double"},
+    {"name": "tradeCount",  "type": "long"}
+  ]
+}

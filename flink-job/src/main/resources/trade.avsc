@@ -1,0 +1,11 @@
+{
+  "type": "record",
+  "name": "Trade",
+  "namespace": "io.cryptostream",
+  "fields": [
+    {"name": "symbol",    "type": "string"},
+    {"name": "price",     "type": "double"},
+    {"name": "volume",    "type": "double"},
+    {"name": "timestamp", "type": "long", "doc": "Unix milliseconds"}
+  ]
+}
