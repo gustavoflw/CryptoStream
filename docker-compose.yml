@@ -61,6 +61,34 @@ services:
         condition: service_healthy
     restart: on-failure
 
+  flink-jobmanager:
+    build:
+      context: flink-job
+      dockerfile: Dockerfile
+    command: standalone-job --job-classname io.cryptostream.FlinkJob
+    ports:
+      - "8082:8081"
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+
+  flink-taskmanager:
+    build:
+      context: flink-job
+      dockerfile: Dockerfile
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    depends_on:
+      - flink-jobmanager
+
   kafka-ui:
     image: ghcr.io/kafbat/kafka-ui:latest
     ports:

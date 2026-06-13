@@ -101,6 +101,8 @@ CryptoStream/
    sbt run
    ```
 
+   Reads from `trades`, writes 30-second tumbling window aggregates to `price_aggregates` and spike alerts (≥2% avg price change between windows) to `alerts`. Window size and spike threshold are configurable via `WINDOW_SECONDS` and `SPIKE_THRESHOLD_PCT` env vars.
+
 4. Run the Spark batch job (once some data has accumulated):
    ```bash
    cd spark-job
